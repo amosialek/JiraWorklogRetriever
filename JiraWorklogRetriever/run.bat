@@ -1,0 +1,1 @@
+﻿JiraWorklogRetriever https://yourJiraUrl.atlassian.net your.email@company.co yourJiraToken howManyDaysBack
