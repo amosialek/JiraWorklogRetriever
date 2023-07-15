@@ -2,6 +2,7 @@
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -15,8 +16,8 @@ namespace Jira
     {
         public async static Task JiraApiGetWorkLog(string baseUrl, string email, string token, int lastNDays = 8) 
         {
-            string jql = $"worklogAuthor = currentUser() AND worklogDate > -{lastNDays}d";
-            var request = JiraApiCreateRequestMessage($"issue/picker?currentJQL={jql}", email, token, HttpMethod.Get);
+            string jql = $"worklogDate>-{lastNDays}d AND worklogAuthor=currentUser()";
+            var request = JiraApiCreateRequestMessage($"search?jql={jql}", email, token, HttpMethod.Get);
             var client = new HttpClient();
 
             client.BaseAddress = new Uri($"{baseUrl}/rest/api/latest/");
@@ -26,9 +27,9 @@ namespace Jira
             var content = response.Content;
             try
             {
-                var issuePickerRootObject = JsonConvert.DeserializeObject<IssuePickerRootObject>(await content.ReadAsStringAsync());
+                var issuePickerRootObject = JsonConvert.DeserializeObject<SearchRootObject>(await content.ReadAsStringAsync());
                 List<Worklog> myWorklogs = new List<Worklog>();
-                foreach (var issue in issuePickerRootObject.sections.SelectMany(x => x.issues))
+                foreach (var issue in issuePickerRootObject.issues)
                 {
                     request = JiraApiCreateRequestMessage($"issue/{issue.key}/worklog",email,token, HttpMethod.Get);
                     response = await client.SendAsync(request);
