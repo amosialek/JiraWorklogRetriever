@@ -29,38 +29,47 @@ namespace Jira
             {
                 var issuePickerRootObject = JsonConvert.DeserializeObject<SearchRootObject>(await content.ReadAsStringAsync());
                 List<Worklog> myWorklogs = new List<Worklog>();
+                List<Task<WorklogRootObject?>> worklogTasks = new List<Task<WorklogRootObject?>>();
                 foreach (var issue in issuePickerRootObject.issues)
                 {
-                    request = JiraApiCreateRequestMessage($"issue/{issue.key}/worklog",email,token, HttpMethod.Get);
-                    response = await client.SendAsync(request);
-                    status = response.StatusCode;
-                    content = response.Content;
-                    var worklogRootObject = JsonConvert.DeserializeObject<WorklogRootObject>(await content.ReadAsStringAsync());
-                    foreach(var worklog in worklogRootObject.worklogs)
-                    { worklog.issue = issue;}
-                    myWorklogs.AddRange(worklogRootObject
-                        .worklogs
-                        .Where(x => x.author.emailAddress == email
-                            && DateTime.Now.AddDays(-lastNDays) < x.started));
-                    
+                    worklogTasks.Add(GetWorklogObject(email, token, client, issue));
                 }
-                var myWorklogsOrdered = myWorklogs.OrderBy(x => x.started).GroupBy(x => x.started.Date,x=>x);
-                foreach (var worklogGroup in myWorklogsOrdered)
+                var results = await Task.WhenAll(worklogTasks);
+                if (results is not null)
                 {
-                    Console.WriteLine($"{worklogGroup.Key.ToString("yyyy-MM-dd")}");
-                    foreach(var worklog in worklogGroup)
+                    myWorklogs.AddRange(results.Where(x => x is not null).SelectMany(x => x!.worklogs)
+                            .Where(x => x.author.emailAddress == email
+                                && DateTime.Now.AddDays(-lastNDays) < x.started));
+                    var myWorklogsOrdered = myWorklogs.OrderBy(x => x.started).GroupBy(x => x.started.Date, x => x);
+                    foreach (var worklogGroup in myWorklogsOrdered)
                     {
-                        Console.WriteLine($"\t{worklog.timeSpentSeconds / 3600.0}h {worklog.timeSpentSeconds % 3600.0/60.0}m {worklog.issue.key}");
+                        Console.WriteLine($"{worklogGroup.Key.ToString("yyyy-MM-dd")} ({worklogGroup.Key.DayOfWeek})");
+                        foreach (var worklog in worklogGroup)
+                        {
+                            Console.WriteLine($"\t{worklog.timeSpentSeconds / 3600.0}h {worklog.timeSpentSeconds % 3600.0 / 60.0}m {worklog.issue.key}");
+                        }
+                        Console.WriteLine($"\ttotal: {worklogGroup.Sum(x => x.timeSpentSeconds) / 3600.0}h\n");
                     }
-                    Console.WriteLine($"\ttotal: {worklogGroup.Sum(x => x.timeSpentSeconds) / 3600.0}h");
-                }   
+                }
             }
             catch (Exception e)
             {
                 Console.WriteLine(e);
             }
         }
-        
+
+        private static async Task<WorklogRootObject?> GetWorklogObject(string email, string token, HttpClient client, Issue issue)
+        {
+            var request = JiraApiCreateRequestMessage($"issue/{issue.key}/worklog", email, token, HttpMethod.Get);
+            var response = await client.SendAsync(request);
+            var content = response.Content;
+            var worklogRootObject = JsonConvert.DeserializeObject<WorklogRootObject>(await content.ReadAsStringAsync());
+            foreach (var worklog in worklogRootObject.worklogs)
+            { worklog.issue = issue; }
+
+            return worklogRootObject;
+        }
+
         public static HttpRequestMessage JiraApiCreateRequestMessage(string url, string email, string token, HttpMethod method, string content = null)
         {
             var message = new HttpRequestMessage(method, url);
